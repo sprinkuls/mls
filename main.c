@@ -7,55 +7,144 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <getopt.h>
+
+// filter out anything that begins with '.' like hidden folders, '.', '..'
+// used by default
+int dotfilter(const struct dirent *input) {
+    if (input->d_name[0] == '.')
+        return 0;
+    return 1;
+}
+
+// filter out only '.' and '..'
+// used with -A (almost all) flag
+int relativefilter(const struct dirent *input) {
+    if (strcmp(input->d_name, ".") && strcmp(input->d_name, ".."))
+        return 1;
+    return 0;
+}
 
 int main(int argc, char **argv)
 {
-    char *dirpath;
-    if (argc == 1)
-        dirpath = ".";
-    else
-        dirpath = argv[1];
 
-    // (try to) parse args
-    //char c;
-    //// trying to be clever: run the 'for' loop until
-    //// the arguments don't start with '-'
-    //for (int i = 1; (c = argv[i][0]) == '-'; i++) {
+    // store the filter we're using (-a, -A, or default)
+    typeof(int (const struct dirent*)) *filter = dotfilter;
 
-    //}
+    char **paths;
+    int numPaths = 0;
 
-    long size = 1024;
+    // https://www.gnu.org/software/libc/manual/html_node/Getopt-Long-Options.html
+    // https://www.gnu.org/software/libc/manual/html_node/Getopt-Long-Option-Example.html
+    int c;
+    while(1) {
+        static struct option long_options[] = {
+            {"all",             no_argument, 0, 'a'},
+            {"almost-all",      no_argument, 0, 'A'},
+            {0, 0, 0, 0}
+        };
+        int option_index = 0;
 
-    char *buf, *ptr;
-    buf = ptr = NULL;
+        c = getopt_long(argc, argv, "aA1l", long_options, &option_index);
 
-    // loops until 'ptr' stops pointing to null,
-    // which should only happen when we get a successful read from getcwd()
-    // copied from https://pubs.opengroup.org/onlinepubs/9699919799/functions/getcwd.html
-    for (buf = ptr = NULL; ptr == NULL; size *= 2)
-    {
-        if ((buf = realloc(buf, size)) == NULL)
-        {
-            printf("ERROR!\n");
-            exit(EXIT_FAILURE);
-        }
+        if (c == -1)
+            break;
 
-
-        ptr = getcwd(buf, size);
-        if (ptr == NULL && errno != ERANGE)
-        {
-            printf("ERROR!\n");
-            exit(EXIT_FAILURE);
+        switch (c) {
+            case 'a':
+                //puts ("option -a\n");
+                filter = NULL;
+                break;
+            case 'A':
+                //puts("option -A\n");
+                filter = relativefilter;
+                break;
+            case '1':
+                puts("option -1\n");
+                break;
+            case '?': // unrecognized flag
+                puts("Try 'mls --help' for more information.");
+                exit(EXIT_FAILURE);
+                break;
+            default: // non-flag argument (like a path!)
+                break;
         }
     }
+
+    // store paths (any other arguments passed)
+    // would it be better to not store the paths, but rather stat objects
+    // or something? idk
+    // TODO: validate that the paths given are actually valid
+    if (optind < argc) {
+        paths = malloc((argc - optind) * sizeof(char*));
+
+        while (optind < argc) {
+            paths[numPaths] = argv[optind];
+            numPaths++;
+            optind++;
+        }
+    } else {
+        paths = malloc(sizeof(char*));
+        paths[0] = ".";
+        numPaths = 1;
+    }
+
+
+    // TODO: clean this up / figure out long listing
+    int lflag = 0;
+    int oneflag;
 
 
     DIR *d;
     struct dirent *entry;
     struct stat statbuf;
-    d = opendir(dirpath);
+    d = opendir(paths[0]);
 
+    struct dirent **namelist;
+
+    if (numPaths > 1) { // multiple paths given
+        //TODO: all for single file paths to be given, not just directories
+        for (int i = 0; i < numPaths; i++) {
+            printf("%s:\n",paths[i]);
+
+            struct dirent **namelist;
+            int numFiles = scandir(paths[0], &namelist, filter, alphasort);
+            for (int i = 0; i < numFiles; i++) {
+                printf("%s\t", namelist[i]->d_name);
+            }
+
+            if (i+1 != numPaths)
+                putchar('\n');
+            putchar('\n');
+        }
+
+    } else { // no paths/files given, so list files for the current dir
+        struct dirent **namelist;
+        int numFiles = scandir(paths[0], &namelist, filter, alphasort);
+        for (int i = 0; i < numFiles; i++) {
+            printf("%s\t", namelist[i]->d_name);
+        }
+        putchar('\n');
+    }
+
+    /*
     if (d) {
+        int numFiles = scandir(paths[0], &namelist, filter, alphasort);
+        for (int i = 0; i < numFiles; i++) {
+            // filter out '.' and '..'
+            //if (strcmp(namelist[i]->d_name, ".") && strcmp(namelist[i]->d_name, ".."))
+                printf("%s\t", namelist[i]->d_name);
+        }
+        //printf("\n%d files found.\n", numFiles-2); // -2 for '.' and '..'
+        printf("\n%d files found.\n", numFiles); // -2 for '.' and '..'
+    } else {
+        printf("'%s': No such directory\n", paths[0]);
+    }
+    */
+
+    /*
+    if (d) {
+        // so, is all of this unneccessary :)
         while ((entry = readdir(d)) != NULL) {
             int dp = strlen(dirpath);
             int dn = strlen(entry->d_name);
@@ -86,6 +175,7 @@ int main(int argc, char **argv)
     } else {
         printf("'%s': No such file or directory\n", dirpath);
     }
+    */
 
 
     return 0;
